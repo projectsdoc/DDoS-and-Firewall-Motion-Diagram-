@@ -1,202 +1,190 @@
-import React from 'react';
-import { SimulationConfig } from '../types';
-import { Shield, ShieldOff, Zap, ShieldAlert, Cpu, HelpCircle, Activity } from 'lucide-react';
+import React, { useState } from 'react';
+import { DiagramNode, FlowDiagram, PresetScenario } from '../types';
+import { parseTextToDiagram } from '../utils/localParser';
+import { Sparkles, Cpu } from 'lucide-react';
 
 interface ControlPanelProps {
-  config: SimulationConfig;
-  onChange: (updates: Partial<SimulationConfig>) => void;
-  onTriggerPreset: (preset: 'idle' | 'moderate' | 'full-attack') => void;
+  presets: PresetScenario[];
+  selectedNode: DiagramNode | null;
+  onApplyDiagram: (diagram: FlowDiagram) => void;
+  onUpdateNode: (updated: DiagramNode) => void;
+  onDeleteNode: (nodeId: string) => void;
+  onAddNode: (type: DiagramNode['type']) => void;
+  onAddEdge: (fromId: string, toId: string, label: string) => void;
+  allNodes: DiagramNode[];
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
-  config,
-  onChange,
-  onTriggerPreset,
+  presets,
+  selectedNode,
+  onApplyDiagram,
+  onUpdateNode,
+  onDeleteNode,
+  onAddNode,
+  onAddEdge,
+  allNodes,
 }) => {
+  const [inputText, setInputText] = useState<string>(presets[0].rawText);
+  const [isParsing, setIsParsing] = useState<boolean>(false);
+  const [parseMode, setParseMode] = useState<'AI' | 'Offline' | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Trigger Local Rule-Based Fast Heuristics Parser
+  const handleLocalOfflineParse = () => {
+    setErrorMessage(null);
+    try {
+      const diagram = parseTextToDiagram(inputText);
+      diagram.rawPromptText = inputText;
+      onApplyDiagram(diagram);
+    } catch (err: any) {
+      setErrorMessage('Local parser failed: ' + err.message);
+    }
+  };
+
+  // Trigger Gemini API Parser
+  const handleAISmartParse = async () => {
+    if (!inputText.trim()) {
+      setErrorMessage('Please type or paste some technical text first!');
+      return;
+    }
+
+    setIsParsing(true);
+    setParseMode('AI');
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/parse-diagram', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ text: inputText }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned error status ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.fallback) {
+        console.info('Server falls back to local layout heuristics.');
+        const localDiag = parseTextToDiagram(inputText);
+        localDiag.rawPromptText = inputText;
+        onApplyDiagram(localDiag);
+        setErrorMessage('Notice: Working in dynamic local layout sandbox mode.');
+      } else {
+        data.rawPromptText = inputText;
+        onApplyDiagram(data);
+      }
+    } catch (error: any) {
+      console.warn('AI Parsing failed, invoking automatic fallback...', error);
+      const fallbackDiagram = parseTextToDiagram(inputText);
+      fallbackDiagram.rawPromptText = inputText;
+      onApplyDiagram(fallbackDiagram);
+      setErrorMessage('Using high-fidelity offline layout sandbox engine.');
+    } finally {
+      setIsParsing(false);
+      setParseMode(null);
+    }
+  };
+
+  const handleApplyPreset = (preset: PresetScenario) => {
+    setInputText(preset.rawText);
+    const diagramCopy = { ...preset.diagram, rawPromptText: preset.rawText };
+    onApplyDiagram(diagramCopy);
+    setErrorMessage(null);
+  };
+
   return (
-    <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-xl p-5 h-full flex flex-col justify-between">
+    <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/85 rounded-xl p-5 flex flex-col gap-6">
+      
+      {/* SECTION 1: INTERACTIVE TEXT TO DIAGRAM PORT */}
       <div>
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-          <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <Zap className="w-4 h-4 text-amber-500" /> SIMULATION ENGINE CONTROL
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-3.5">
+          <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-cyan-400" /> ENGINE SOURCE WRITER
           </h2>
-          <span className="font-mono text-[9px] px-2 py-0.5 rounded bg-slate-950 text-amber-500 border border-slate-800/60 animate-pulse">
-            LIVE PRESET
+          <span className="font-mono text-[9px] px-2 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800/60 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            READY
           </span>
         </div>
 
-        {/* 1. FIREWALL TOGGLE (THE MAIN SWITCH) */}
-        <div className="mt-5">
-          <label className="font-mono text-[10px] uppercase text-slate-400 tracking-wider block mb-2">
-            PROACTIVE DEFENSE GATEWAY
-          </label>
+        <p className="text-xs text-slate-400 mb-2 leading-relaxed">
+          Type or paste any tech system tutorial, code description, block layout context, or architecture logic below:
+        </p>
+
+        <textarea
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          placeholder="e.g. A client laptop connects to Nginx load balancer to make inquiries to separate database servers."
+          className="w-full h-24 bg-slate-950/90 border border-slate-800/80 rounded-lg p-3 font-mono text-xs text-slate-300 focus:outline-none focus:border-cyan-500/50 resize-none transition-all selection:bg-cyan-500/40"
+        />
+
+        {errorMessage && (
+          <div className="text-[10px] font-mono text-amber-400 bg-amber-950/20 border border-amber-900/60 p-2.5 rounded-lg mt-2 flex items-center gap-1.5">
+            <span className="w-1 h-3 bg-amber-400 rounded-full" />
+            {errorMessage}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          {/* AI Smart Parse Button */}
           <button
-            id="firewall-toggle-btn"
-            onClick={() => onChange({ firewallActive: !config.firewallActive })}
-            className={`w-full py-3.5 px-4 rounded-xl font-mono text-xs font-bold transition-all duration-300 flex items-center justify-center gap-2 border shadow-lg ${
-              config.firewallActive
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white border-cyan-400 hover:from-cyan-500 hover:to-blue-500 glow-cyan'
-                : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
+            onClick={handleAISmartParse}
+            disabled={isParsing}
+            className={`py-3 px-3 rounded-lg font-mono text-xs font-bold tracking-wide flex items-center justify-center gap-2 transition border ${
+              isParsing && parseMode === 'AI'
+                ? 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400 animate-pulse cursor-wait'
+                : 'bg-cyan-600 hover:bg-cyan-500 border-cyan-550 text-white shadow-cyan-950/50 cursor-pointer glow-cyan active:scale-98'
             }`}
           >
-            {config.firewallActive ? (
-              <>
-                <Shield className="w-4 h-4 animate-bounce" />
-                L7 FIREWALL ACTIVE (ENFORCING)
-              </>
-            ) : (
-              <>
-                <ShieldOff className="w-4 h-4 text-rose-500 mr-1" />
-                BYPASSED / DISARMED (DANGER)
-              </>
-            )}
+            <Sparkles className="w-3.5 h-3.5" />
+            {isParsing && parseMode === 'AI' ? 'COMPILING...' : 'AI SMART PARSE'}
+          </button>
+
+          {/* Instant Local Parse Button */}
+          <button
+            onClick={handleLocalOfflineParse}
+            disabled={isParsing}
+            className="py-3 px-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-lg font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-98"
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            INSTANT OFFLINE
           </button>
         </div>
+      </div>
 
-        {/* 2. SYSTEM SCENARIOS PRESETS */}
-        <div className="mt-6">
-          <label className="font-mono text-[10px] uppercase text-slate-400 tracking-wider block mb-2">
-            SIMULATION PRESETS
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              id="preset-idle-btn"
-              onClick={() => onTriggerPreset('idle')}
-              className="py-1.5 px-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded font-mono text-[9px] text-slate-300 text-center transition"
-            >
-              🟢 Healthy State
-            </button>
-            <button
-              id="preset-moderate-btn"
-              onClick={() => onTriggerPreset('moderate')}
-              className="py-1.5 px-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded font-mono text-[9px] text-amber-400 text-center transition"
-            >
-              🟡 Mitigated DDoS
-            </button>
-            <button
-              id="preset-full-btn"
-              onClick={() => onTriggerPreset('full-attack')}
-              className="py-1.5 px-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded font-mono text-[9px] text-rose-500 text-center transition animate-pulse"
-            >
-              🔴 Volumetric Overrun
-            </button>
-          </div>
-        </div>
-
-        {/* 3. DDOS BOTNET INTENSITY */}
-        <div className="mt-6 pt-5 border-t border-slate-800/60">
-          <div className="flex justify-between items-center mb-1.5">
-            <label className="font-mono text-[10px] uppercase text-slate-400 tracking-wider">
-              DDoS ATTACK INTENSITY
-            </label>
-            <span className={`font-mono text-xs font-bold ${config.ddosIntensity > 60 ? 'text-rose-500' : config.ddosIntensity > 15 ? 'text-amber-500' : 'text-slate-400'}`}>
-              {config.ddosIntensity}%
-            </span>
-          </div>
-          <input
-            id="ddos-intensity-range"
-            type="range"
-            min="0"
-            max="100"
-            value={config.ddosIntensity}
-            onChange={(e) => onChange({ ddosIntensity: parseInt(e.target.value) })}
-            className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-          />
-          <div className="flex justify-between font-mono text-[8px] text-slate-500 mt-1">
-            <span>0% (CLEAN)</span>
-            <span>50% (MODERATE)</span>
-            <span>100% (CRITICAL Volumetric)</span>
-          </div>
-        </div>
-
-        {/* 4. ATTACK VECTOR METHODOLOGY */}
-        <div className="mt-5">
-          <label className="font-mono text-[10px] uppercase text-slate-400 tracking-wider block mb-2">
-            ATTACK METHODOLOGY VECTOR
-          </label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {(['SYN Flood', 'UDP Flood', 'HTTP GET Flood'] as const).map((type) => (
+      {/* SECTION 2: LITERAL PRESETS TEMPLATES */}
+      <div className="pb-1">
+        <label className="font-mono text-[9px] uppercase text-slate-400 tracking-wider block mb-2.5">
+          SELECT COHESIVE TUTORIAL PRESETS
+        </label>
+        <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
+          {presets.map((preset) => {
+            const isActive = inputText === preset.rawText;
+            return (
               <button
-                id={`attack-type-${type.replace(/\s+/g, '-').toLowerCase()}`}
-                key={type}
-                onClick={() => onChange({ attackType: type })}
-                className={`py-1.5 px-0.5 rounded border text-[9px] font-mono text-center transition ${
-                  config.attackType === type
-                    ? 'bg-rose-950/40 text-rose-400 border-rose-500/60'
-                    : 'bg-slate-950/70 text-slate-400 border-slate-800/80 hover:bg-slate-800/60'
+                key={preset.id}
+                onClick={() => handleApplyPreset(preset)}
+                className={`w-full p-2.5 rounded-lg text-left border text-xs transition duration-200 flex flex-col gap-1 ${
+                  isActive
+                    ? 'bg-slate-800/60 border-cyan-500/50 text-white'
+                    : 'bg-slate-950/40 border-slate-850 text-slate-450 hover:bg-slate-900/40 hover:text-slate-200'
                 }`}
-                disabled={config.ddosIntensity === 0}
               >
-                {type}
+                <div className="font-mono font-bold flex items-center gap-1.5 text-[11px]">
+                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`} />
+                  {preset.name}
+                </div>
+                <div className="text-[10px] text-slate-400 line-clamp-1 leading-normal">{preset.description}</div>
               </button>
-            ))}
-          </div>
-          {config.ddosIntensity === 0 && (
-            <p className="text-[7.5px] font-mono text-slate-500 mt-1">
-              * Increase Attack Intensity above 0% to modify attack vector.
-            </p>
-          )}
-        </div>
-
-        {/* 5. VALID CLIENT RATE */}
-        <div className="mt-6 pt-5 border-t border-slate-800/60">
-          <div className="flex justify-between items-center mb-1.5">
-            <label className="font-mono text-[10px] uppercase text-slate-400 tracking-wider">
-              VALID TRAFFIC RATE (CLIENT FEED)
-            </label>
-            <span className="font-mono text-xs font-bold text-emerald-400">
-              {config.validTrafficRate} Hz
-            </span>
-          </div>
-          <input
-            id="valid-traffic-range"
-            type="range"
-            min="1"
-            max="10"
-            value={config.validTrafficRate}
-            onChange={(e) => onChange({ validTrafficRate: parseInt(e.target.value) })}
-            className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          />
-          <div className="flex justify-between font-mono text-[8px] text-slate-500 mt-1">
-            <span>Slow Feed (1 Hz)</span>
-            <span>Standard TCP Line</span>
-            <span>High Load Line (10 Hz)</span>
-          </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* FOOTER INFO: FIREWALL RULES LIST */}
-      <div className="mt-6 pt-4 border-t border-slate-800/60 bg-slate-950 p-3 rounded-lg border border-slate-800/50">
-        <h4 className="font-mono text-[9px] font-bold text-slate-400 tracking-wider mb-2 uppercase flex items-center justify-between">
-          <span>ACTIVE RULES LOGICAL FILTER</span>
-          <span className="text-[7px] bg-cyan-950 px-1 py-0.5 rounded text-cyan-400">
-            {config.firewallActive ? 'ENFORCED' : 'OFFLINE'}
-          </span>
-        </h4>
-        <div className="space-y-1.5 text-[8.5px] font-mono text-slate-400 leading-snug">
-          <div className="flex items-center justify-between p-1 rounded bg-slate-900 border border-slate-800/40">
-            <span className="text-emerald-400 text-[8px]">01 // ALLOW</span>
-            <span className="text-slate-300">TCP 203.0.113.88 → PORT 8080</span>
-          </div>
-          {config.firewallActive ? (
-            <div className="flex items-center justify-between p-1 rounded bg-rose-950/20 border border-cyan-800/40 animate-pulse">
-              <span className="text-cyan-400 text-[8px]">02 // DROP</span>
-              <span className="text-slate-300">
-                {config.attackType === 'SYN Flood' 
-                  ? 'SYN_LIMIT_RATE 100/sec' 
-                  : config.attackType === 'UDP Flood' 
-                    ? 'UDP_PROTOCOL_DROP_ALL' 
-                    : 'HTTP_USER_AGENT_BLOCKED'}
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between p-1 rounded bg-slate-900/40 border border-dashed border-rose-950/60 text-slate-500">
-              <span className="text-[8px] text-rose-500">02 // BYPASS</span>
-              <span>MALICIOUS CONNECTIONS PASSED</span>
-            </div>
-          )}
-        </div>
-      </div>
+
+
     </div>
   );
 };

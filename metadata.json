@@ -1,6 +1,6 @@
 {
-  "name": "DDoS and Firewall Motion Diagram",
-  "description": "An interactive 2D technical motion diagram of network infrastructure showing DDoS connection waves being blocked by a firewall, alongside valid traffic.",
+  "name": "FlowMotion AI",
+  "description": "Smart Text-to-Animation Engine that parses complex technical descriptions, tutorials, or system architectures into elegant, responsive animated 2D diagrams.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
